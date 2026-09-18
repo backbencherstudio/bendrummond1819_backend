@@ -12,7 +12,7 @@ export function buildSwaggerOptions() {
   const builder = new DocumentBuilder()
     .setTitle(`${appConfig().app.name} API`)
     .setVersion('1.0')
-    .addServer('http://192.168.7.42:4222');
+    .addServer('http://10.10.9.189:4000');
 
   Object.values(SWAGGER_AUTH).forEach((name) => {
     builder.addBearerAuth(

@@ -21,6 +21,21 @@ async function bootstrap() {
   // Handle raw body for webhooks
   // app.use('/payment/stripe/webhook', express.raw({ type: 'application/json' }));
 
+   // HTTP request logging
+  app.use((req, res, next) => {
+    const start = Date.now();
+
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+
+      console.log(
+        `[HTTP] ${req.method} ${req.originalUrl} ${res.statusCode} - ${duration}ms - IP: ${req.ip}`,
+      );
+    });
+
+    next();
+  });
+
   app.setGlobalPrefix('api');
   app.enableCors({
     origin: '*',
@@ -93,6 +108,12 @@ async function bootstrap() {
   });
   // end swagger
 
+
+  const appUrl = appConfig().app.url;
+
   await app.listen(process.env.PORT ?? 4000, '0.0.0.0');
+
+  console.log(`API: ${appUrl}/api/`);
+
 }
 bootstrap();

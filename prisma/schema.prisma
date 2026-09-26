@@ -67,7 +67,7 @@ model User {
   domain     String? @unique
   avatar     String?
 
-  phone_number  String?
+  phone_number  String? @unique
   country       String?
   state         String?
   city          String?
@@ -88,6 +88,8 @@ model User {
 
   is_two_factor_enabled Int?    @default(0)
   two_factor_secret     String? // secret key for two factor authentication
+
+  phone_verified_at DateTime?
 
   accounts                  Account[]
   creator_conversations     Conversation[] @relation("creator")

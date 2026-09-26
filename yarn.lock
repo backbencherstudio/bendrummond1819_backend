@@ -6745,6 +6745,11 @@ libphonenumber-js@^1.10.53:
   resolved "https://registry.yarnpkg.com/libphonenumber-js/-/libphonenumber-js-1.12.28.tgz#c684b93edc72aac53ea095f99ca5b429c484889f"
   integrity sha512-sDB+nY8l1d2SHC0TnBat4uovsx1EjrkesK9U8Arl2/LQluXn3OQczwqr2M/1V2Lo0ajnaY/nZjvacg6vmbqWUQ==
 
+libphonenumber-js@^1.13.14:
+  version "1.13.14"
+  resolved "https://registry.yarnpkg.com/libphonenumber-js/-/libphonenumber-js-1.13.14.tgz#cf4e4a9a9c113566fc19917adfac77f8a4adb9bf"
+  integrity sha512-llihgCcx0BFLksecLP+x1J+6JDE1GsXS1RN/LoPF6qcwpeQcnjj0lcvZxY8AzbEpYwyZWPZW/nDuqkqzm3amiw==
+
 libqp@2.1.1:
   version "2.1.1"
   resolved "https://registry.yarnpkg.com/libqp/-/libqp-2.1.1.tgz#f1be767a58f966f500597997cab72cfc1e17abfa"
@@ -9682,10 +9687,10 @@ tslib@2.8.1, tslib@^2.0.0, tslib@^2.0.1, tslib@^2.1.0, tslib@^2.6.2:
   resolved "https://registry.yarnpkg.com/tslib/-/tslib-2.8.1.tgz#612efe4ed235d567e8aba5f2a5fab70280ade83f"
   integrity sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==
 
-twilio@^6.0.0:
-  version "6.0.0"
-  resolved "https://registry.yarnpkg.com/twilio/-/twilio-6.0.0.tgz#b0984125c431a52d6d3cd27351e531f528464922"
-  integrity sha512-MAie5DJ3KLpcKlDaYtNzsKMQXcCi+YHWKvZjuSpm27vJAO/l8PanJA0LkkJ03sbh+Kwe5NeL0Q2+y6IjNUYeUA==
+twilio@^6.1.1:
+  version "6.1.1"
+  resolved "https://registry.yarnpkg.com/twilio/-/twilio-6.1.1.tgz#da2541b13421d908118104884d37a98bdc4e5347"
+  integrity sha512-d9xFCQaa8DpuDvFiG49TwmppmULHhqzEVncpppazS5oZv5O0E9Wb76STCHt4q+ZjWDL6RAtKey+u8jWcQLKWjw==
   dependencies:
     axios "^1.13.5"
     dayjs "^1.11.9"

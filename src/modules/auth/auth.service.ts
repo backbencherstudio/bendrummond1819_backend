@@ -1,5 +1,13 @@
 // external imports
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { 
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  NotFoundException,
+  BadRequestException,
+  InternalServerErrorException,
+ } from '@nestjs/common';
+
 import { JwtService } from '@nestjs/jwt';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
@@ -16,6 +24,17 @@ import { DateHelper } from '../../common/helper/date.helper';
 import { StripePayment } from '../../common/lib/Payment/stripe/StripePayment';
 import { StringHelper } from '../../common/helper/string.helper';
 import { UpdateSwaggerDto } from './dto/update-swagger.dto';
+import { TwilioVerifyService } from 'src/twilio/twilio-verify.service';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
+
+type RegisterInput = {
+  name: string;
+  email: string;
+  password: string;
+  phone: string;
+  birthDate?: Date;
+  type?: string;
+};
 
 @Injectable()
 export class AuthService {
@@ -25,6 +44,7 @@ export class AuthService {
     private mailService: MailService,
     private userRepository: UserRepository,
     private ucodeRepository: UcodeRepository,
+    private twilioVerifyService: TwilioVerifyService,
     @InjectRedis() private readonly redis: Redis,
   ) {}
 
@@ -317,129 +337,462 @@ export class AuthService {
     }
   }
 
-  async register({
+  private normalizePhoneNumber(input: string): string {
+    const raw = input.trim();
+
+    const phone = raw.startsWith('+')
+      ? parsePhoneNumberFromString(raw)
+      : parsePhoneNumberFromString(raw, 'BD');
+
+    if (!phone || !phone.isValid()) {
+      throw new BadRequestException(
+        'Invalid phone number. Use a valid Bangladesh number, e.g. 018XXXXXXXX or +88018XXXXXXXX.',
+      );
+    }
+
+    return phone.number; // E.164, e.g. +8801844467018
+  }
+
+  // async register({
+  //   name,
+  //   email,
+  //   phone,
+  //   birthDate,
+  //   password,
+  //   type = 'user',
+  // }: {
+  //   name: string;
+  //   email: string;
+  //   password: string;
+  //   phone: string;
+  //   birthDate?: Date;
+  //   type?: string;
+  // }) {
+  //   try {
+  //     // Check if email already exist
+  //     const userEmailExist = await this.userRepository.exist({
+  //       field: 'email',
+  //       value: String(email),
+  //     });
+
+  //     if (userEmailExist) {
+  //       return {
+  //         statusCode: 401,
+  //         message: 'Email already exist',
+  //       };
+  //     }
+
+  //     const normalizedPhone = this.normalizePhoneNumber(phone);
+
+  //     const phoneExists = await this.userRepository.exist({
+  //       field: 'phone_number',
+  //       value: normalizedPhone,
+  //     });
+
+  //     if (phoneExists) {
+  //       throw new ConflictException('Phone number already exists');
+  //     }
+
+  //     const user = await this.userRepository.createUser({
+  //       name,
+  //       email,
+  //       password,
+  //       phone_number: normalizedPhone,
+  //       birthDate: birthDate,
+  //       type,
+  //     });
+
+  //     if (user == null || user.success == false) {
+  //       return {
+  //         success: false,
+  //         message: 'Failed to create account',
+  //       };
+  //     }
+
+  //     try {
+  //       await this.twilioVerifyService.sendSms(normalizedPhone);
+  //     } catch (error) {
+
+  //       await this.userRepository.deleteUser(user.data.id);
+
+  //       throw error;
+  //     }
+
+  //     // create stripe customer account
+  //     const stripeCustomer = await StripePayment.createCustomer({
+  //       user_id: user.data.id,
+  //       email: email,
+  //       name: name,
+  //     });
+
+  //     if (stripeCustomer) {
+  //       await this.prisma.user.update({
+  //         where: {
+  //           id: user.data.id,
+  //         },
+  //         data: {
+  //           billing_id: stripeCustomer.id,
+  //         },
+  //       });
+  //     }
+
+  //     // ----------------------------------------------------
+  //     // // create otp code
+  //     // const token = await this.ucodeRepository.createToken({
+  //     //   userId: user.data.id,
+  //     //   isOtp: true,
+  //     // });
+
+  //     // // send otp code to email
+  //     // await this.mailService.sendOtpCodeToEmail({
+  //     //   email: email,
+  //     //   name: name,
+  //     //   otp: token,
+  //     // });
+
+  //     // return {
+  //     //   success: true,
+  //     //   message: 'We have sent an OTP code to your email',
+  //     // };
+
+  //     // ----------------------------------------------------
+
+  //     // Generate verification token
+  //     // const token = await this.ucodeRepository.createVerificationToken({
+  //     //   userId: user.data.id,
+  //     //   email: email,
+  //     // });
+
+  //     // Send verification email with token
+  //     // await this.mailService.sendVerificationLink({
+  //     //   email,
+  //     //   name: email,
+  //     //   token: token.token,
+  //     //   type: type,
+  //     // });
+
+  //     // create otp code
+  //     const token = await this.ucodeRepository.createToken({
+  //       userId: user.data.id,
+  //       isOtp: true,
+  //     });
+
+  //     // console.log(token);
+
+  //     // send otp code to email
+  //     // await this.mailService.sendOtpCodeToEmail({
+  //     //   email: user.data.email,
+  //     //   name: user.data.name,
+  //     //   otp: token,
+  //     // });
+
+  //     return {
+  //       success: true,
+  //       message: 'Verification code sent to your mobile number',
+  //       nextStep: 'VERIFY_PHONE',
+  //     };
+  //   } catch (error) {
+  //     return {
+  //       success: false,
+  //       message: error,
+  //     };
+  //   }
+  // }
+
+  async resendPhoneVerification(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+        phone_number: true,
+        phone_verified_at: true,
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (user.phone_verified_at) {
+      return {
+        success: true,
+        message: 'Phone number is already verified',
+        nextStep: 'COMPLETED',
+      };
+    }
+
+    if (!user.phone_number) {
+      throw new BadRequestException(
+        'No phone number is associated with this account',
+      );
+    }
+
+    await this.twilioVerifyService.sendSms(
+      user.phone_number,
+    );
+
+      return {
+        success: true,
+        message:
+          'Verification code sent to your mobile number',
+        nextStep: 'VERIFY_PHONE',
+      };
+    }
+
+    
+
+    async register({
     name,
     email,
     phone,
     birthDate,
     password,
     type = 'user',
-  }: {
-    name: string;
-    email: string;
-    password: string;
-    phone?: string;
-    birthDate?: Date;
-    type?: string;
-  }) {
+  }: RegisterInput) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPhone = this.normalizePhoneNumber(phone);
+
+    // Check email
+    const emailExists = await this.userRepository.exist({
+      field: 'email',
+      value: normalizedEmail,
+    });
+
+    if (emailExists) {
+      throw new ConflictException('Email already exists');
+    }
+
+    // Check phone
+    const phoneExists = await this.userRepository.exist({
+      field: 'phone_number',
+      value: normalizedPhone,
+    });
+
+    if (phoneExists) {
+      throw new ConflictException('Phone number already exists');
+    }
+
+    // Create user first.
+    //
+    // Ideally the user should be created as:
+    // status: PENDING
+    // phone_verified_at: null
+    const user = await this.userRepository.createUser({
+      name: name.trim(),
+      email: normalizedEmail,
+      password,
+      phone_number: normalizedPhone,
+      birthDate,
+      type,
+    });
+
+    if (!user?.success || !user.data) {
+      throw new InternalServerErrorException(
+        'Failed to create account',
+      );
+    }
+
+    const userId = user.data.id;
+
+    /*
+     * Stripe should normally NOT block registration.
+     *
+     * A temporary Stripe outage should not prevent somebody
+     * from creating an account.
+     *
+     * For even better architecture, move this to a queue/job.
+     */
     try {
-      // Check if email already exist
-      const userEmailExist = await this.userRepository.exist({
-        field: 'email',
-        value: String(email),
-      });
+      const stripeCustomer =
+        await StripePayment.createCustomer({
+          user_id: userId,
+          email: normalizedEmail,
+          name: name.trim(),
+        });
 
-      if (userEmailExist) {
-        return {
-          statusCode: 401,
-          message: 'Email already exist',
-        };
-      }
-
-      const user = await this.userRepository.createUser({
-        name,
-        email,
-        password,
-        phone_number: phone,
-        birthDate: birthDate,
-        type,
-      });
-
-      if (user == null || user.success == false) {
-        return {
-          success: false,
-          message: 'Failed to create account',
-        };
-      }
-
-      // create stripe customer account
-      const stripeCustomer = await StripePayment.createCustomer({
-        user_id: user.data.id,
-        email: email,
-        name: name,
-      });
-
-      if (stripeCustomer) {
+      if (stripeCustomer?.id) {
         await this.prisma.user.update({
           where: {
-            id: user.data.id,
+            id: userId,
           },
           data: {
             billing_id: stripeCustomer.id,
           },
         });
       }
+    } catch (error) {
+      // Replace with Pino/Winston logger in production.
+      console.error(
+        `Failed to create Stripe customer for user ${userId}`,
+        error,
+      );
 
-      // ----------------------------------------------------
-      // // create otp code
-      // const token = await this.ucodeRepository.createToken({
-      //   userId: user.data.id,
-      //   isOtp: true,
-      // });
+      // Do not fail registration because Stripe failed.
+    }
 
-      // // send otp code to email
-      // await this.mailService.sendOtpCodeToEmail({
-      //   email: email,
-      //   name: name,
-      //   otp: token,
-      // });
-
-      // return {
-      //   success: true,
-      //   message: 'We have sent an OTP code to your email',
-      // };
-
-      // ----------------------------------------------------
-
-      // Generate verification token
-      // const token = await this.ucodeRepository.createVerificationToken({
-      //   userId: user.data.id,
-      //   email: email,
-      // });
-
-      // Send verification email with token
-      // await this.mailService.sendVerificationLink({
-      //   email,
-      //   name: email,
-      //   token: token.token,
-      //   type: type,
-      // });
-
-      // create otp code
-      const token = await this.ucodeRepository.createToken({
-        userId: user.data.id,
-        isOtp: true,
-      });
-
-      // console.log(token);
-
-      // send otp code to email
-      await this.mailService.sendOtpCodeToEmail({
-        email: user.data.email,
-        name: user.data.name,
-        otp: token,
-      });
+    /*
+     * Send phone verification OTP.
+     *
+     * Important:
+     * We do NOT delete the user when Twilio fails.
+     * The user remains pending/unverified and can request
+     * another OTP later.
+     */
+    try {
+      await this.twilioVerifyService.sendSms(
+        normalizedPhone,
+      );
+    } catch (error) {
+      console.error(
+        `Failed to send verification SMS for user ${userId}`,
+        error,
+      );
 
       return {
         success: true,
-        message: 'We have sent an OTP code to your email',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: error.message,
+        message:
+          'Account created, but we could not send the verification code. Please request a new code.',
+        nextStep: 'RESEND_PHONE_VERIFICATION',
+        data: {
+          userId,
+          phone: normalizedPhone,
+          phoneVerified: false,
+        },
       };
     }
+
+    return {
+      success: true,
+      message:
+        'Account created successfully. Verification code sent to your mobile number.',
+      nextStep: 'VERIFY_PHONE',
+      data: {
+        userId,
+        phone: normalizedPhone,
+        phoneVerified: false,
+      },
+    };
+  }
+
+  private async generateAccessToken(user: {
+    id: string;
+    phone_number?: string | null;
+  }): Promise<string> {
+    return this.jwtService.signAsync({
+      sub: user.id,
+      phone_number: user.phone_number,
+    });
+  }
+
+  async verifyPhone(userId: string, code: string) {
+  try {
+    const user = await this.userRepository.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (!user.phone_number) {
+      throw new BadRequestException(
+        'User does not have a phone number',
+      );
+    }
+
+    if (user.phone_verified_at) {
+      return {
+        success: true,
+        message: 'Phone number already verified',
+      };
+    }
+
+    const result =
+      await this.twilioVerifyService.verifySms(
+        user.phone_number,
+        code,
+      );
+
+    if (!result.success || result.status !== 'approved') {
+      throw new BadRequestException(
+        'Invalid or expired verification code',
+      );
+    }
+
+    // 1. Mark phone verified
+    const verifiedUser =
+      await this.userRepository.markPhoneAsVerified(userId);
+
+    // 2. Create Stripe customer AFTER verification
+    if (!verifiedUser.billing_id) {
+      const stripeCustomer =
+        await StripePayment.createCustomer({
+          user_id: verifiedUser.id,
+          email: verifiedUser.email,
+          name: verifiedUser.name,
+        });
+
+      if (stripeCustomer) {
+        await this.prisma.user.update({
+          where: {
+            id: verifiedUser.id,
+          },
+          data: {
+            billing_id: stripeCustomer.id,
+          },
+        });
+      }
+    }
+    
+    const accessToken = await this.generateAccessToken(
+      verifiedUser,
+    );
+
+    return {
+      success: true,
+      message: 'Phone number verified successfully',
+      accessToken,
+      user: {
+        id: verifiedUser.id,
+        name: verifiedUser.name,
+        email: verifiedUser.email,
+        phone: verifiedUser.phone_number,
+      },
+    };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async resendPhoneOtp(userId: string) {
+    const user =
+      await this.userRepository.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (!user.phone_number) {
+      throw new BadRequestException(
+        'Phone number not found',
+      );
+    }
+
+    if (user.phone_verified_at) {
+      return {
+        success: true,
+        message: 'Phone number already verified',
+      };
+    }
+
+    await this.twilioVerifyService.sendSms(
+      user.phone_number,
+    );
+
+    return {
+      success: true,
+      message: 'Verification code sent',
+    };
   }
 
   async forgotPassword(email) {

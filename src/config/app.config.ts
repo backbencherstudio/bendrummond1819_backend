@@ -8,7 +8,7 @@ export default () => ({
   },
 
   fileSystems: {
-    public: {},
+    public: {}, 
     s3: {
       driver: 's3',
       key: process.env.AWS_ACCESS_KEY_ID,
@@ -97,4 +97,12 @@ export default () => ({
       password: process.env.SYSTEM_PASSWORD,
     },
   },
+
+  tailio: {
+    accountSid: process.env.TWILIO_ACCOUNT_SID,
+    authToken: process.env.TWILIO_AUTH_TOKEN,
+    verifyServiceSid: process.env.TWILIO_VERIFY_SERVICE_SID,
+  },
+
+  
 });

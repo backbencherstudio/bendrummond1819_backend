@@ -1,5 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { 
+  IsEmail, 
+  IsNotEmpty, 
+  IsString, 
+  MinLength,
+  Matches,
+ } from 'class-validator';
 
 export class LoginDto {
   @ApiProperty({
@@ -94,4 +100,23 @@ export class ChangePasswordDto {
   @IsNotEmpty()
   @MinLength(6)
   new_password: string;
+}
+
+export class VerifyPhoneOtpDto {
+  @IsString()
+  @IsNotEmpty()
+  userId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^\d{4,10}$/, {
+    message: 'Invalid OTP format',
+  })
+  code: string;
+}
+
+export class ResendPhoneOtpDto {
+  @IsString()
+  @IsNotEmpty()
+  userId: string;
 }

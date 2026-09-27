@@ -581,4 +581,42 @@ export class UserRepository {
     });
     return user;
   }
+
+  async findById(id: string) {
+    return this.prisma.user.findUnique({
+      where: {
+        id,
+      },
+    });
+  }
+
+  async findByPhone(phone: string) {
+    return this.prisma.user.findUnique({
+      where: {
+        phone_number: phone,
+      },
+    });
+  }
+
+  async markPhoneAsVerified(userId: string) {
+    return this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        phone_verified_at: new Date(),
+      },
+    });
+  }
+
+  async markRegistrationCompleted(userId: string) {
+    return this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        phone_verified_at: new Date(),
+      },
+    });
+  }
 }

@@ -39,6 +39,8 @@ import {
   RefreshTokenDto,
   ResendVerificationEmailDto,
   ResetPasswordDto,
+  VerifyPhoneOtpDto,
+  ResendPhoneOtpDto,
 } from './dto/auth.dto';
 import { UpdateSwaggerDto } from './dto/update-swagger.dto';
 
@@ -464,4 +466,23 @@ export class AuthController {
   //   }
   // }
   // --------- end 2FA ---------
+
+  @ApiOperation({ summary: 'Verify user phone number' })
+  @ApiBody({ type: VerifyPhoneOtpDto })
+  @Post('verify-phone')
+  async verifyPhone(@Body() data: VerifyPhoneOtpDto) {
+    return this.authService.verifyPhone(
+      data.userId,
+      data.code,
+    );
+  }
+
+  @Post('register/resend-phone-otp')
+  async resendPhoneOtp(
+    @Body() data: ResendPhoneOtpDto,
+  ) {
+    return this.authService.resendPhoneOtp(
+      data.userId,
+    );
+  }
 }

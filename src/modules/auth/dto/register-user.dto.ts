@@ -22,7 +22,7 @@ export class RegisterUserDto {
     description: 'Phone number',
     required: false,
   })
-  phone?: string;
+  phone!: string;
 
   @IsOptional()
   @ApiProperty({

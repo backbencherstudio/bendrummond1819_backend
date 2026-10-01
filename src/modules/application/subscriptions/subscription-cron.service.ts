@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { TwilioService } from '../notification/twilio.service';
+// import { TwilioService } from '../notification/twilio.service';
 import { PayFrequency } from 'prisma/generated/enums';
 
 @Injectable()
@@ -10,7 +10,7 @@ export class SubscriptionCronService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly twilioService: TwilioService,
+  //  private readonly twilioService: TwilioService,
   ) {}
 
   /**
@@ -96,22 +96,22 @@ export class SubscriptionCronService {
           }
         }
 
-        if (isDueToday) {
-          const message = `Reminder: Your ${commitment.name} payment of $${Number(commitment.amount)} is due today.`;
-          try {
-            await this.twilioService.sendSms(
-              commitment.user.phone_number,
-              message,
-            );
-            this.logger.log(
-              `Payment reminder sent to ${commitment.user.name} (${commitment.user.phone_number}) for ${commitment.name}`,
-            );
-          } catch (smsError) {
-            this.logger.error(
-              `Failed to send SMS to ${commitment.user.phone_number}: ${smsError.message}`,
-            );
-          }
-        }
+        // if (isDueToday) {
+        //   const message = `Reminder: Your ${commitment.name} payment of $${Number(commitment.amount)} is due today.`;
+        //   try {
+        //     await this.twilioService.sendSms(
+        //       commitment.user.phone_number,
+        //       message,
+        //     );
+        //     this.logger.log(
+        //       `Payment reminder sent to ${commitment.user.name} (${commitment.user.phone_number}) for ${commitment.name}`,
+        //     );
+        //   } catch (smsError) {
+        //     this.logger.error(
+        //       `Failed to send SMS to ${commitment.user.phone_number}: ${smsError.message}`,
+        //     );
+        //   }
+        // }
       }
     } catch (error) {
       this.logger.error('Failed to process payment reminder cron:', error.stack);

@@ -151,15 +151,15 @@ export class TwilioVerifyService {
     );
 
     if (err.status === 429) {
-    throw new HttpException(
-        {
-        success: false,
-        message:
-            'Too many verification attempts. Please try again later.',
-        code: 'OTP_RATE_LIMITED',
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-    );
+      throw new HttpException(
+          {
+          success: false,
+          message:
+              'Too many verification attempts. Please try again later.',
+          code: 'OTP_RATE_LIMITED',
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     if (

@@ -73,6 +73,7 @@ export class AuthController {
       const name = data.name;
       const email = data.email;
       const phone = data.phone;
+      const countryCode = data.countryCode;
       const birthDate = data.birthDate;
       const password = data.password;
 
@@ -95,6 +96,7 @@ export class AuthController {
         email,
         password,
         phone,
+        countryCode,
         birthDate,
       });
 

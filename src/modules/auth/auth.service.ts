@@ -25,12 +25,16 @@ import { StripePayment } from '../../common/lib/Payment/stripe/StripePayment';
 import { StringHelper } from '../../common/helper/string.helper';
 import { UpdateSwaggerDto } from './dto/update-swagger.dto';
 import { TwilioVerifyService } from 'src/twilio/twilio-verify.service';
-import { parsePhoneNumberFromString } from 'libphonenumber-js';
+import { 
+  parsePhoneNumberFromString,
+  CountryCode,
+ } from 'libphonenumber-js';
 
 type RegisterInput = {
   name: string;
   email: string;
   password: string;
+  countryCode: CountryCode;
   phone: string;
   birthDate?: Date;
   type?: string;
@@ -337,22 +341,26 @@ export class AuthService {
     }
   }
 
-  private normalizePhoneNumber(input: string): string {
+  private normalizePhoneNumber(
+    input: string,
+    countryCode?: CountryCode,
+  ): string {
     const raw = input.trim();
 
     const phone = raw.startsWith('+')
       ? parsePhoneNumberFromString(raw)
-      : parsePhoneNumberFromString(raw, 'BD');
+      : countryCode
+        ? parsePhoneNumberFromString(raw, countryCode)
+        : undefined;
 
     if (!phone || !phone.isValid()) {
       throw new BadRequestException(
-        'Invalid phone number. Use a valid Bangladesh number, e.g. 018XXXXXXXX or +88018XXXXXXXX.',
+        'Invalid phone number. Please provide a valid phone number and country.',
       );
     }
 
-    return phone.number; // E.164, e.g. +8801844467018
+    return phone.number;
   }
-
   // async register({
   //   name,
   //   email,
@@ -540,19 +548,18 @@ export class AuthService {
         nextStep: 'VERIFY_PHONE',
       };
     }
-
     
-
-    async register({
+  async register({
     name,
     email,
     phone,
+    countryCode,
     birthDate,
     password,
     type = 'user',
   }: RegisterInput) {
     const normalizedEmail = email.trim().toLowerCase();
-    const normalizedPhone = this.normalizePhoneNumber(phone);
+    const normalizedPhone = this.normalizePhoneNumber(phone, countryCode);
 
     // Check email
     const emailExists = await this.userRepository.exist({
@@ -595,15 +602,6 @@ export class AuthService {
     }
 
     const userId = user.data.id;
-
-    /*
-     * Stripe should normally NOT block registration.
-     *
-     * A temporary Stripe outage should not prevent somebody
-     * from creating an account.
-     *
-     * For even better architecture, move this to a queue/job.
-     */
     try {
       const stripeCustomer =
         await StripePayment.createCustomer({
@@ -628,8 +626,6 @@ export class AuthService {
         `Failed to create Stripe customer for user ${userId}`,
         error,
       );
-
-      // Do not fail registration because Stripe failed.
     }
 
     /*
@@ -640,28 +636,28 @@ export class AuthService {
      * The user remains pending/unverified and can request
      * another OTP later.
      */
-    try {
-      await this.twilioVerifyService.sendSms(
-        normalizedPhone,
-      );
-    } catch (error) {
-      console.error(
-        `Failed to send verification SMS for user ${userId}`,
-        error,
-      );
+    // try {
+    //   await this.twilioVerifyService.sendSms(
+    //     normalizedPhone,
+    //   );
+    // } catch (error) {
+    //   console.error(
+    //     `Failed to send verification SMS for user ${userId}`,
+    //     error,
+    //   );
 
-      return {
-        success: true,
-        message:
-          'Account created, but we could not send the verification code. Please request a new code.',
-        nextStep: 'RESEND_PHONE_VERIFICATION',
-        data: {
-          userId,
-          phone: normalizedPhone,
-          phoneVerified: false,
-        },
-      };
-    }
+    //   return {
+    //     success: true,
+    //     message:
+    //       'Account created, but we could not send the verification code. Please request a new code.',
+    //     nextStep: 'RESEND_PHONE_VERIFICATION',
+    //     data: {
+    //       userId,
+    //       phone: normalizedPhone,
+    //       phoneVerified: false,
+    //     },
+    //   };
+    // }
 
     return {
       success: true,
@@ -686,9 +682,12 @@ export class AuthService {
     });
   }
 
-  async verifyPhone(userId: string, code: string) {
-  try {
-    const user = await this.userRepository.findById(userId);
+  async verifyPhone(
+    userId: string,
+    code: string,
+  ) {
+    const user =
+      await this.userRepository.findById(userId);
 
     if (!user) {
       throw new NotFoundException('User not found');
@@ -696,57 +695,50 @@ export class AuthService {
 
     if (!user.phone_number) {
       throw new BadRequestException(
-        'User does not have a phone number',
+        'Phone number is not associated with this account',
       );
     }
 
     if (user.phone_verified_at) {
+      const accessToken =
+        await this.generateAccessToken(user);
+
       return {
         success: true,
         message: 'Phone number already verified',
+        accessToken,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone_number,
+          phoneVerified: true,
+        },
       };
     }
 
-    const result =
+    const verification =
       await this.twilioVerifyService.verifySms(
         user.phone_number,
         code,
       );
 
-    if (!result.success || result.status !== 'approved') {
+    if (
+      !verification.success ||
+      verification.status !== 'approved'
+    ) {
       throw new BadRequestException(
         'Invalid or expired verification code',
       );
     }
 
-    // 1. Mark phone verified
     const verifiedUser =
-      await this.userRepository.markPhoneAsVerified(userId);
+      await this.userRepository.markPhoneAsVerified(
+        user.id,
+      );
 
-    // 2. Create Stripe customer AFTER verification
-    if (!verifiedUser.billing_id) {
-      const stripeCustomer =
-        await StripePayment.createCustomer({
-          user_id: verifiedUser.id,
-          email: verifiedUser.email,
-          name: verifiedUser.name,
-        });
-
-      if (stripeCustomer) {
-        await this.prisma.user.update({
-          where: {
-            id: verifiedUser.id,
-          },
-          data: {
-            billing_id: stripeCustomer.id,
-          },
-        });
-      }
-    }
-    
-    const accessToken = await this.generateAccessToken(
-      verifiedUser,
-    );
+    const accessToken =
+      await this.generateAccessToken(verifiedUser);
 
     return {
       success: true,
@@ -757,11 +749,9 @@ export class AuthService {
         name: verifiedUser.name,
         email: verifiedUser.email,
         phone: verifiedUser.phone_number,
+        phoneVerified: true,
       },
     };
-    } catch (error) {
-      throw error;
-    }
   }
 
   async resendPhoneOtp(userId: string) {

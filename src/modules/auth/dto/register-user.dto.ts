@@ -1,5 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, MinLength } from 'class-validator';
+import { 
+  IsNotEmpty, 
+  IsOptional, 
+  MinLength,
+  IsString,
+  Length,
+  Matches,
+ } from 'class-validator';
+
+import type { CountryCode } from 'libphonenumber-js';
 
 export class RegisterUserDto {
   @IsNotEmpty()
@@ -17,12 +26,26 @@ export class RegisterUserDto {
   email: string;
 
   @IsOptional()
+  @IsString()
+  @Length(2, 2)
+  @Matches(/^[A-Z]{2}$/, {
+    message: 'countryCode must be a valid ISO 3166-1 alpha-2 country code',
+  })
   @ApiProperty({
-    example: '+1234567890',
-    description: 'Phone number',
+    example: 'US',
+    description:
+      'ISO 3166-1 alpha-2 country code used to parse the phone number',
     required: false,
   })
-  phone!: string;
+  countryCode?: CountryCode;
+
+  @IsString()
+  @IsNotEmpty()
+  @ApiProperty({
+    example: '4155552671',
+    description: 'Phone number',
+  })
+  phone: string;
 
   @IsOptional()
   @ApiProperty({

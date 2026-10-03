@@ -103,14 +103,22 @@ export class ChangePasswordDto {
 }
 
 export class VerifyPhoneOtpDto {
+  @ApiProperty({
+    example: 'cmujkwu9d0001y6antp2wv5wd',
+    description: 'User ID returned after registration',
+  })
   @IsString()
   @IsNotEmpty()
   userId: string;
 
+  @ApiProperty({
+    example: '123456',
+    description: 'OTP code sent to the user phone number',
+  })
   @IsString()
   @IsNotEmpty()
-  @Matches(/^\d{4,10}$/, {
-    message: 'Invalid OTP format',
+  @Matches(/^\d{6}$/, {
+    message: 'OTP must be a 6-digit code',
   })
   code: string;
 }

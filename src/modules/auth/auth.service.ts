@@ -636,28 +636,28 @@ export class AuthService {
      * The user remains pending/unverified and can request
      * another OTP later.
      */
-    // try {
-    //   await this.twilioVerifyService.sendSms(
-    //     normalizedPhone,
-    //   );
-    // } catch (error) {
-    //   console.error(
-    //     `Failed to send verification SMS for user ${userId}`,
-    //     error,
-    //   );
+    try {
+      await this.twilioVerifyService.sendSms(
+        normalizedPhone,
+      );
+    } catch (error) {
+      console.error(
+        `Failed to send verification SMS for user ${userId}`,
+        error,
+      );
 
-    //   return {
-    //     success: true,
-    //     message:
-    //       'Account created, but we could not send the verification code. Please request a new code.',
-    //     nextStep: 'RESEND_PHONE_VERIFICATION',
-    //     data: {
-    //       userId,
-    //       phone: normalizedPhone,
-    //       phoneVerified: false,
-    //     },
-    //   };
-    // }
+      return {
+        success: true,
+        message:
+          'Account created, but we could not send the verification code. Please request a new code.',
+        nextStep: 'RESEND_PHONE_VERIFICATION',
+        data: {
+          userId,
+          phone: normalizedPhone,
+          phoneVerified: false,
+        },
+      };
+    }
 
     return {
       success: true,

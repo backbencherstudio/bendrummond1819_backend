@@ -64,6 +64,13 @@ export class TwilioVerifyService {
   }
 
   async sendSms(phoneNumber: string) {
+    const maskedPhone =
+      this.maskPhoneNumber(phoneNumber);
+
+    this.logger.log(
+      `[OTP_SEND_START] to=${maskedPhone} service=${this.maskSid(this.serviceSid)}`,
+    );
+
     try {
       const verification =
         await this.client.verify.v2
@@ -74,7 +81,12 @@ export class TwilioVerifyService {
           });
 
       this.logger.log(
-        `Twilio verification created: sid=${verification.sid}, status=${verification.status}`,
+        `[OTP_SEND_ACCEPTED] ${JSON.stringify({
+          verificationSid: verification.sid,
+          status: verification.status,
+          to: maskedPhone,
+          channel: verification.channel,
+        })}`,
       );
 
       return {
@@ -84,11 +96,44 @@ export class TwilioVerifyService {
         to: verification.to,
       };
     } catch (error: unknown) {
+      const err = error as {
+        status?: number;
+        code?: number;
+        message?: string;
+        moreInfo?: string;
+      };
+
+      this.logger.error(
+        `[OTP_SEND_REJECTED] ${JSON.stringify({
+          to: maskedPhone,
+          httpStatus: err.status,
+          twilioCode: err.code,
+          message: err.message,
+          moreInfo: err.moreInfo,
+        })}`,
+      );
+
       this.handleTwilioError(
         error,
         'send verification code',
       );
     }
+  }
+
+  private maskPhoneNumber(phone: string): string {
+    if (phone.length <= 7) {
+      return '***';
+    }
+
+    return `${phone.slice(0, 4)}*****${phone.slice(-3)}`;
+  }
+
+  private maskSid(sid: string): string {
+    if (!sid || sid.length < 8) {
+      return '***';
+    }
+
+    return `${sid.slice(0, 4)}...${sid.slice(-4)}`;
   }
 
   async verifySms(
@@ -141,46 +186,132 @@ export class TwilioVerifyService {
     };
 
     this.logger.error(
-      `Twilio failed to ${operation}`,
-      JSON.stringify({
+      `[TWILIO_ERROR] ${JSON.stringify({
+        operation,
+        httpStatus: err.status,
+        twilioCode: err.code,
         message: err.message,
-        code: err.code,
-        status: err.status,
         moreInfo: err.moreInfo,
-      }),
+      })}`,
     );
 
-    if (err.status === 429) {
+    // Bangladesh/country blocked in VERIFY Geo Permissions
+    if (err.code === 60605) {
       throw new HttpException(
-          {
+        {
           success: false,
           message:
-              'Too many verification attempts. Please try again later.',
-          code: 'OTP_RATE_LIMITED',
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
+            'This destination country is disabled in Twilio Verify Geo Permissions.',
+          code: 'OTP_GEO_BLOCKED',
+          twilioCode: err.code,
+        },
+        HttpStatus.FORBIDDEN,
       );
     }
 
-    if (
-      err.status === 400 ||
-      err.status === 404
-    ) {
+    // Fraud Guard
+    if (err.code === 60410) {
+      throw new HttpException(
+        {
+          success: false,
+          message:
+            'Twilio Fraud Guard blocked this verification attempt.',
+          code: 'OTP_FRAUD_GUARD_BLOCKED',
+          twilioCode: err.code,
+        },
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    // Invalid phone/channel/etc.
+    if (err.code === 60200) {
       throw new BadRequestException({
         success: false,
         message:
-          operation === 'verify verification code'
-            ? 'Invalid or expired verification code'
-            : 'Unable to send verification code to this phone number',
-        code: 'OTP_REQUEST_INVALID',
+          'Twilio rejected the phone number or verification parameters.',
+        code: 'OTP_INVALID_PARAMETER',
+        twilioCode: err.code,
       });
+    }
+
+    // Too many OTP sends in same verification lifecycle
+    if (err.code === 60203) {
+      throw new HttpException(
+        {
+          success: false,
+          message:
+            'Maximum OTP send attempts reached. Please wait before requesting another code.',
+          code: 'OTP_MAX_SEND_ATTEMPTS',
+          twilioCode: err.code,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    // Too many simultaneous requests for same number
+    if (err.code === 60212) {
+      throw new HttpException(
+        {
+          success: false,
+          message:
+            'Too many verification requests for this phone number.',
+          code: 'OTP_CONCURRENT_LIMIT',
+          twilioCode: err.code,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    // SMS channel disabled for Verify Service
+    if (err.code === 60223) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'SMS verification is disabled for this Twilio Verify Service.',
+        code: 'OTP_CHANNEL_DISABLED',
+        twilioCode: err.code,
+      });
+    }
+
+    if (err.status === 401) {
+      throw new InternalServerErrorException({
+        success: false,
+        message:
+          'Twilio authentication failed. Check API Key SID and API Secret.',
+        code: 'OTP_PROVIDER_AUTH_ERROR',
+        twilioCode: err.code,
+      });
+    }
+
+    if (err.status === 404) {
+      throw new InternalServerErrorException({
+        success: false,
+        message:
+          'Twilio Verify Service was not found. Check the Verify Service SID and Twilio account.',
+        code: 'OTP_SERVICE_NOT_FOUND',
+        twilioCode: err.code,
+      });
+    }
+
+    if (err.status === 429) {
+      throw new HttpException(
+        {
+          success: false,
+          message:
+            'Too many verification attempts. Please try again later.',
+          code: 'OTP_RATE_LIMITED',
+          twilioCode: err.code,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     throw new InternalServerErrorException({
       success: false,
       message:
-        'Phone verification service is temporarily unavailable',
+        'Phone verification service is temporarily unavailable.',
       code: 'OTP_PROVIDER_ERROR',
+      twilioCode: err.code,
     });
   }
 }

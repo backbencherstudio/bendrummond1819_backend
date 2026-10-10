@@ -6,6 +6,7 @@ import {
   NotFoundException,
   BadRequestException,
   InternalServerErrorException,
+  ForbiddenException,
  } from '@nestjs/common';
 
 import { JwtService } from '@nestjs/jwt';
@@ -29,6 +30,8 @@ import {
   parsePhoneNumberFromString,
   CountryCode,
  } from 'libphonenumber-js';
+
+import * as bcrypt from 'bcrypt';
 
 type RegisterInput = {
   name: string;
@@ -177,100 +180,120 @@ export class AuthService {
     }
   }
 
-  async validateUser(
-    email: string,
-    pass: string,
-    token?: string,
-  ): Promise<any> {
-    const _password = pass;
-    const user = await this.prisma.user.findFirst({
+ async validateUser(
+    phone: string,
+    password: string,
+  ) {
+    const parsedPhone = parsePhoneNumberFromString(
+      phone.trim(),
+    );
+
+    if (!parsedPhone || !parsedPhone.isValid()) {
+      throw new UnauthorizedException(
+        'Invalid phone number or password',
+      );
+    }
+
+    const normalizedPhone = parsedPhone.number;
+
+    const user = await this.prisma.user.findUnique({
       where: {
-        email: email,
+        phone_number: normalizedPhone,
       },
     });
 
-    if (user) {
-      const _isValidPassword = await this.userRepository.validatePassword({
-        email: email,
-        password: _password,
-      });
-      if (_isValidPassword) {
-        const { password, ...result } = user;
-        if (user.is_two_factor_enabled) {
-          if (token) {
-            const isValid = await this.userRepository.verify2FA(user.id, token);
-            if (!isValid) {
-              throw new UnauthorizedException('Invalid token');
-              // return {
-              //   success: false,
-              //   message: 'Invalid token',
-              // };
-            }
-          } else {
-            throw new UnauthorizedException('Token is required');
-            // return {
-            //   success: false,
-            //   message: 'Token is required',
-            // };
-          }
-        }
-        return result;
-      } else {
-        throw new UnauthorizedException('Password not matched');
-        // return {
-        //   success: false,
-        //   message: 'Password not matched',
-        // };
-      }
-    } else {
-      throw new UnauthorizedException('Email not found');
-      // return {
-      //   success: false,
-      //   message: 'Email not found',
-      // };
+    if (!user) {
+      throw new UnauthorizedException(
+        'Invalid phone number or password',
+      );
     }
+
+    const isPasswordValid = await bcrypt.compare(
+      password,
+      user.password,
+    );
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException(
+        'Invalid phone number or password',
+      );
+    }
+
+    if (!user.phone_verified_at) {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Please verify your phone number before logging in.',
+        code: 'PHONE_NOT_VERIFIED',
+      });
+    }
+
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone_number: user.phone_number,
+      type: user.type,
+    };
   }
 
-  async login({ email, userId }) {
-    try {
-      const payload = { email: email, sub: userId };
-
-      const accessToken = this.jwtService.sign(payload, { expiresIn: '1h' });
-      const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
-
-      const user = await this.userRepository.getUserDetails(userId);
-
-      // store refreshToken
-      await this.redis.set(
-        `refresh_token:${user.id}`,
-        refreshToken,
-        'EX',
-        60 * 60 * 24 * 7, // 7 days in seconds
+  async login({
+    userId,
+  }: {
+    userId: string;
+  }) {
+    const user =
+      await this.userRepository.getUserDetails(
+        userId,
       );
 
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: {
-          updated_at: new Date(),
-        },
+    if (!user) {
+      throw new UnauthorizedException(
+        'User not found',
+      );
+    }
+
+    const payload = {
+      sub: user.id,
+    };
+
+    const accessToken =
+      this.jwtService.sign(payload, {
+        expiresIn: '1h',
       });
 
-      return {
-        success: true,
-        message: 'Logged in successfully',
-        authorization: {
-          type: 'bearer',
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        },
-        type: user.type,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: error.message,
-      };
-    }
+    const refreshToken =
+      this.jwtService.sign(payload, {
+        expiresIn: '7d',
+      });
+
+    // Store refresh token for 7 days
+    await this.redis.set(
+      `refresh_token:${user.id}`,
+      refreshToken,
+      'EX',
+      60 * 60 * 24 * 7,
+    );
+
+    await this.prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        updated_at: new Date(),
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Logged in successfully',
+      authorization: {
+        type: 'bearer',
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      },
+      type: user.type,
+    };
   }
 
   async refreshToken(user_id: string, refreshToken: string) {

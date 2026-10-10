@@ -5,19 +5,25 @@ import {
   IsString, 
   MinLength,
   Matches,
+  MaxLength,
  } from 'class-validator';
 
 export class LoginDto {
   @ApiProperty({
-    description: 'Email address of the user',
-    example: 'user@gmail.com',
+    description:
+      'Phone number in international E.164 format',
+    example: '+8801844467018',
   })
-  @IsEmail()
+  @IsString()
   @IsNotEmpty()
-  email: string;
+  @Matches(/^\+[1-9]\d{7,14}$/, {
+    message:
+      'Phone number must be in valid international format, for example +8801844467018',
+  })
+  phone: string;
 
   @ApiProperty({
-    description: 'Password of the user',
+    description: 'User password',
     example: '12345678',
   })
   @IsString()
@@ -124,7 +130,13 @@ export class VerifyPhoneOtpDto {
 }
 
 export class ResendPhoneOtpDto {
+  @ApiProperty({
+    example: 'cmuz67o6i00008zm953rv5gpt',
+    description:
+      'User ID returned after registration',
+  })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(64)
   userId: string;
 }

@@ -1,40 +1,68 @@
 import {
+  BadRequestException,
   ExecutionContext,
-  HttpException,
-  HttpStatus,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 
 @Injectable()
-export class LocalAuthGuard extends AuthGuard('local') {
-  canActivate(context: ExecutionContext) {
-    // Add your custom authentication logic here
-    // for example, call super.logIn(request) to establish a session.
+export class LocalAuthGuard extends AuthGuard(
+  'local',
+) {
+  canActivate(
+    context: ExecutionContext,
+  ) {
     return super.canActivate(context);
   }
 
-  handleRequest(err, user, info, context: ExecutionContext, status) {
-    // You can throw an exception based on either "info" or "err" arguments
-    const request = context.switchToHttp().getRequest();
-    const { email, password } = request.body;
+  handleRequest(
+    err: any,
+    user: any,
+    info: any,
+    context: ExecutionContext,
+  ) {
+    const request = context
+      .switchToHttp()
+      .getRequest();
 
-    if (err || !user) {
-      if (!email) {
-        throw new HttpException(
-          { message: 'email not provided' },
-          HttpStatus.OK,
-        );
-      } else if (!password) {
-        throw new HttpException(
-          { message: 'password not provided' },
-          HttpStatus.OK,
-        );
-      } else {
-        throw err || new UnauthorizedException();
-      }
+    const {
+      phone,
+      password,
+    } = request.body;
+
+    if (!phone) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Phone number is required',
+        code: 'PHONE_REQUIRED',
+      });
     }
+
+    if (!password) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Password is required',
+        code: 'PASSWORD_REQUIRED',
+      });
+    }
+
+    if (err) {
+      throw err;
+    }
+
+    if (!user) {
+      throw (
+        info ||
+        new UnauthorizedException({
+          success: false,
+          message:
+            'Invalid phone number or password',
+          code: 'INVALID_CREDENTIALS',
+        })
+      );
+    }
+
     return user;
   }
 }

@@ -107,29 +107,41 @@ export class AuthController {
   }
 
   // login user
-  @ApiOperation({ summary: 'Login user' })
-  @ApiBody({ type: LoginDto })
+ @ApiOperation({
+    summary: 'Login user with phone number',
+  })
+  @ApiBody({
+    type: LoginDto,
+  })
   @UseGuards(LocalAuthGuard)
   @Post('login')
-  async login(@Req() req: Request, @Res() res: Response) {
+  async login(
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     try {
-      const user_id = req.user.id;
+      const userId = req.user.id;
 
-      const user_email = req.user.email;
+      const response =
+        await this.authService.login({
+          userId,
+        });
 
-      const response = await this.authService.login({
-        userId: user_id,
-        email: user_email,
-      });
+      res.cookie(
+        'refresh_token',
+        response.authorization.refresh_token,
+        {
+          httpOnly: true,
+          secure:
+            process.env.NODE_ENV ===
+            'production',
+          sameSite: 'strict',
+          maxAge:
+            1000 * 60 * 60 * 24 * 7,
+        },
+      );
 
-      // store to secure cookies
-      res.cookie('refresh_token', response.authorization.refresh_token, {
-        httpOnly: true,
-        secure: true,
-        maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-      });
-
-      res.json(response);
+      return res.json(response);
     } catch (error) {
       return handleError(error);
     }

@@ -41,6 +41,7 @@ import {
   ResetPasswordDto,
   VerifyPhoneOtpDto,
   ResendPhoneOtpDto,
+  VerifyForgotPasswordOtpDto,
 } from './dto/auth.dto';
 import { UpdateSwaggerDto } from './dto/update-swagger.dto';
 
@@ -221,21 +222,19 @@ export class AuthController {
 
   // --------------change password---------
 
-  @ApiOperation({ summary: 'Forgot password' })
+  @ApiOperation({
+    summary: 'Send forgot password OTP to phone',
+  })
+  @ApiBody({
+    type: ForgotPasswordDto,
+  })
   @Post('forgot-password')
-  async forgotPassword(@Body() data: ForgotPasswordDto) {
-    try {
-      const email = data.email;
-      if (!email) {
-        throw new HttpException('Email not provided', HttpStatus.UNAUTHORIZED);
-      }
-      return await this.authService.forgotPassword(email);
-    } catch (error) {
-      return {
-        success: false,
-        message: 'Something went wrong',
-      };
-    }
+  async forgotPassword(
+    @Body() data: ForgotPasswordDto,
+  ) {
+    return this.authService.forgotPassword(
+      data.phone,
+    );
   }
 
   // verify email to verify the email
@@ -263,6 +262,24 @@ export class AuthController {
     }
   }
 
+  @ApiOperation({
+    summary:
+      'Verify forgot password OTP',
+  })
+  @ApiBody({
+    type: VerifyForgotPasswordOtpDto,
+  })
+  @Post('forgot-password/verify-otp')
+  async verifyForgotPasswordOtp(
+    @Body()
+    data: VerifyForgotPasswordOtpDto,
+  ) {
+    return this.authService.verifyForgotPasswordOtp(
+      data.userId,
+      data.code,
+    );
+  } 
+
   // resend verification email to verify the email
   @ApiOperation({ summary: 'Resend verification email' })
   @Post('resend-verification-email')
@@ -282,36 +299,20 @@ export class AuthController {
   }
 
   // reset password if user forget the password
-  @ApiOperation({ summary: 'Reset password' })
+  @ApiOperation({
+    summary: 'Reset user password',
+  })
+  @ApiBody({
+    type: ResetPasswordDto,
+  })
   @Post('reset-password')
-  async resetPassword(@Body() data: ResetPasswordDto) {
-    try {
-      const email = data.email;
-      const token = data.token;
-      const password = data.password;
-      if (!email) {
-        throw new HttpException('Email not provided', HttpStatus.UNAUTHORIZED);
-      }
-      if (!token) {
-        throw new HttpException('Token not provided', HttpStatus.UNAUTHORIZED);
-      }
-      if (!password) {
-        throw new HttpException(
-          'Password not provided',
-          HttpStatus.UNAUTHORIZED,
-        );
-      }
-      return await this.authService.resetPassword({
-        email: email,
-        token: token,
-        password: password,
-      });
-    } catch (error) {
-      return {
-        success: false,
-        message: 'Something went wrong',
-      };
-    }
+  async resetPassword(
+    @Body() data: ResetPasswordDto,
+  ) {
+    return this.authService.resetPassword(
+      data.resetToken,
+      data.password,
+    );
   }
 
   // change password if user want to change the password

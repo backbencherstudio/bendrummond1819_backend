@@ -938,90 +938,228 @@ export class AuthService {
     )}*****${phoneNumber.slice(-3)}`;
   } 
 
-  async forgotPassword(email) {
-    try {
-      const user = await this.userRepository.exist({
-        field: 'email',
-        value: email,
+  async forgotPassword(
+    phone: string,
+  ) {
+    const parsedPhone =
+      parsePhoneNumberFromString(
+        phone.trim(),
+      );
+
+    if (
+      !parsedPhone ||
+      !parsedPhone.isValid()
+    ) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Invalid phone number',
+        code: 'INVALID_PHONE_NUMBER',
+      });
+    }
+
+    const normalizedPhone =
+      parsedPhone.number;
+
+    const user =
+      await this.prisma.user.findUnique({
+        where: {
+          phone_number:
+            normalizedPhone,
+        },
       });
 
-      if (user) {
-        const token = await this.ucodeRepository.createToken({
-          userId: user.id,
-          isOtp: true,
-        });
-
-        await this.mailService.sendOtpCodeToEmail({
-          email: email,
-          name: user.name,
-          otp: token,
-        });
-
-        return {
-          success: true,
-          message: 'We have sent an OTP code to your email',
-        };
-      } else {
-        return {
-          success: false,
-          message: 'Email not found',
-        };
-      }
-    } catch (error) {
+    if (!user) {
+      /*
+      * Better security:
+      * don't reveal whether phone exists.
+      */
       return {
-        success: false,
-        message: error.message,
+        success: true,
+        message:
+          'If an account exists with this phone number, a verification code has been sent.',
       };
     }
+
+    if (!user.phone_verified_at) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Phone number is not verified',
+        code: 'PHONE_NOT_VERIFIED',
+      });
+    }
+
+    await this.twilioVerifyService.sendSms(
+      user.phone_number,
+    );
+
+    return {
+      success: true,
+      message:
+        'Verification code sent successfully',
+      nextStep:
+        'VERIFY_FORGOT_PASSWORD_OTP',
+      data: {
+        userId: user.id,
+        resendAvailableIn: 30,
+      },
+    };
   }
 
-  async resetPassword({ email, token, password }) {
-    try {
-      const user = await this.userRepository.exist({
-        field: 'email',
-        value: email,
+  async verifyForgotPasswordOtp(
+    userId: string,
+    code: string,
+  ) {
+    const user =
+      await this.prisma.user.findUnique({
+        where: {
+          id: userId,
+        },
       });
 
-      if (user) {
-        const existToken = await this.ucodeRepository.validateToken({
-          email: email,
-          token: token,
-        });
-
-        if (existToken) {
-          await this.userRepository.changePassword({
-            email: email,
-            password: password,
-          });
-
-          // delete otp code
-          await this.ucodeRepository.deleteToken({
-            email: email,
-            token: token,
-          });
-
-          return {
-            success: true,
-            message: 'Password updated successfully',
-          };
-        } else {
-          return {
-            success: false,
-            message: 'Invalid token',
-          };
-        }
-      } else {
-        return {
-          success: false,
-          message: 'Email not found',
-        };
-      }
-    } catch (error) {
-      return {
+    if (!user) {
+      throw new BadRequestException({
         success: false,
-        message: error.message,
-      };
+        message:
+          'Invalid password reset request',
+        code: 'INVALID_RESET_REQUEST',
+      });
     }
+
+    if (!user.phone_number) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Phone number not found',
+        code: 'PHONE_NOT_FOUND',
+      });
+    }
+
+    const verification =
+      await this.twilioVerifyService.verifySms(
+        user.phone_number,
+        code,
+      );
+
+    if (
+      !verification.success ||
+      verification.status !==
+        'approved'
+    ) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Invalid or expired verification code',
+        code: 'OTP_INVALID',
+      });
+    }
+
+    /*
+    * Generate short-lived password reset token.
+    */
+    const resetToken =
+      this.jwtService.sign(
+        {
+          sub: user.id,
+          purpose:
+            'password-reset',
+        },
+        {
+          expiresIn: '10m',
+        },
+      );
+
+    return {
+      success: true,
+      message:
+        'Phone number verified successfully',
+      nextStep:
+        'RESET_PASSWORD',
+      data: {
+        resetToken,
+      },
+    };
+  }
+
+  async resetPassword(
+    resetToken: string,
+    password: string,
+  ) {
+    let payload: {
+      sub: string;
+      purpose: string;
+    };
+
+    try {
+      payload =
+        this.jwtService.verify(
+          resetToken,
+        );
+    } catch {
+      throw new UnauthorizedException({
+        success: false,
+        message:
+          'Password reset token is invalid or expired',
+        code: 'RESET_TOKEN_INVALID',
+      });
+    }
+
+    if (
+      payload.purpose !==
+      'password-reset'
+    ) {
+      throw new UnauthorizedException({
+        success: false,
+        message:
+          'Invalid password reset token',
+        code: 'RESET_TOKEN_INVALID',
+      });
+    }
+
+    const user =
+      await this.prisma.user.findUnique({
+        where: {
+          id: payload.sub,
+        },
+      });
+
+    if (!user) {
+      throw new UnauthorizedException({
+        success: false,
+        message:
+          'Invalid password reset request',
+        code: 'INVALID_RESET_REQUEST',
+      });
+    }
+
+    const hashedPassword =
+      await bcrypt.hash(
+        password,
+        12,
+      );
+
+    await this.prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        password:
+          hashedPassword,
+        updated_at:
+          new Date(),
+      },
+    });
+
+    await this.redis.del(
+      `refresh_token:${user.id}`,
+    );
+
+    return {
+      success: true,
+      message:
+        'Password reset successfully',
+    };
   }
 
   async verifyEmail({ email, token }) {

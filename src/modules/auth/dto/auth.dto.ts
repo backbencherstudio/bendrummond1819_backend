@@ -44,13 +44,19 @@ export class RefreshTokenDto {
 
 export class ForgotPasswordDto {
   @ApiProperty({
-    description: 'Email address of the user',
-    example: 'user@example.com',
+    example: '+8801844467018',
+    description:
+      'Phone number in international E.164 format',
   })
-  @IsEmail()
+  @IsString()
   @IsNotEmpty()
-  email: string;
+  @Matches(/^\+[1-9]\d{7,14}$/, {
+    message:
+      'Phone number must be in valid international format',
+  })
+  phone: string;
 }
+
 
 export class ResendVerificationEmailDto {
   @ApiProperty({
@@ -64,28 +70,19 @@ export class ResendVerificationEmailDto {
 
 export class ResetPasswordDto {
   @ApiProperty({
-    description: 'Email address of the user',
-    example: 'user@example.com',
-  })
-  @IsEmail()
-  @IsNotEmpty()
-  email: string;
-
-  @ApiProperty({
-    description: 'Reset token received via email',
-    example: '123456',
+    description:
+      'Password reset token returned after OTP verification',
   })
   @IsString()
   @IsNotEmpty()
-  token: string;
+  resetToken: string;
 
   @ApiProperty({
-    description: 'New password',
-    example: 'newpassword123',
+    example: 'NewPassword123',
   })
   @IsString()
   @IsNotEmpty()
-  @MinLength(6)
+  @MinLength(8)
   password: string;
 }
 
@@ -139,4 +136,29 @@ export class ResendPhoneOtpDto {
   @IsNotEmpty()
   @MaxLength(64)
   userId: string;
+}
+
+export class VerifyForgotPasswordOtpDto {
+  @ApiProperty({
+    example:
+      'cmuz67o6i00008zm953rv5gpt',
+    description:
+      'User ID returned from forgot-password request',
+  })
+  @IsString()
+  @IsNotEmpty()
+  userId: string;
+
+  @ApiProperty({
+    example: '123456',
+    description:
+      '6-digit OTP sent to phone',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^\d{6}$/, {
+    message:
+      'OTP must be exactly 6 digits',
+  })
+  code: string;
 }

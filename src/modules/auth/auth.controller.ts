@@ -491,6 +491,12 @@ export class AuthController {
     );
   }
 
+  @ApiOperation({
+    summary: 'Resend phone verification OTP',
+  })
+  @ApiBody({
+    type: ResendPhoneOtpDto,
+  })
   @Post('register/resend-phone-otp')
   async resendPhoneOtp(
     @Body() data: ResendPhoneOtpDto,

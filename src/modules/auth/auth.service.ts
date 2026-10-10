@@ -7,6 +7,8 @@ import {
   BadRequestException,
   InternalServerErrorException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
  } from '@nestjs/common';
 
 import { JwtService } from '@nestjs/jwt';
@@ -54,6 +56,8 @@ export class AuthService {
     private twilioVerifyService: TwilioVerifyService,
     @InjectRedis() private readonly redis: Redis,
   ) {}
+
+  private static readonly PHONE_OTP_RESEND_COOLDOWN_SECONDS = 30;
 
   async me(userId: string) {
     try {
@@ -783,31 +787,156 @@ export class AuthService {
       await this.userRepository.findById(userId);
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException({
+        success: false,
+        message: 'User not found',
+        code: 'USER_NOT_FOUND',
+      });
     }
 
     if (!user.phone_number) {
-      throw new BadRequestException(
-        'Phone number not found',
-      );
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Phone number is not associated with this account',
+        code: 'PHONE_NOT_FOUND',
+      });
     }
 
     if (user.phone_verified_at) {
+      throw new ConflictException({
+        success: false,
+          message: 'Phone number is already verified',
+          code: 'PHONE_ALREADY_VERIFIED',
+        });
+      }
+
+      const cooldownSeconds =
+        AuthService.PHONE_OTP_RESEND_COOLDOWN_SECONDS;
+
+      const now = new Date();
+
+      /*
+      * Prevent repeated SMS requests.
+      */
+      if (user.phone_otp_last_sent_at) {
+        const elapsedSeconds = Math.floor(
+          (now.getTime() -
+            user.phone_otp_last_sent_at.getTime()) /
+            1000,
+        );
+
+        if (elapsedSeconds < cooldownSeconds) {
+          const retryAfter =
+            cooldownSeconds - elapsedSeconds;
+
+          throw new HttpException(
+            {
+              success: false,
+              message: `Please wait ${retryAfter} seconds before requesting another verification code.`,
+              code: 'OTP_RESEND_COOLDOWN',
+              retryAfter,
+            },
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+      }
+
+      /*
+      * Claim the resend slot atomically.
+      *
+      * This prevents two simultaneous API requests
+      * from sending two SMS messages.
+      */
+      const eligibleBefore = new Date(
+        now.getTime() - cooldownSeconds * 1000,
+      );
+
+      const claim =
+        await this.prisma.user.updateMany({
+          where: {
+            id: user.id,
+            phone_verified_at: null,
+
+            OR: [
+              {
+                phone_otp_last_sent_at: null,
+              },
+              {
+                phone_otp_last_sent_at: {
+                  lte: eligibleBefore,
+                },
+              },
+            ],
+          },
+
+          data: {
+            phone_otp_last_sent_at: now,
+          },
+        });
+
+      /*
+      * Another request may have claimed the resend
+      * window between our SELECT and UPDATE.
+      */
+      if (claim.count === 0) {
+        throw new HttpException(
+          {
+            success: false,
+            message:
+              'Please wait before requesting another verification code.',
+            code: 'OTP_RESEND_COOLDOWN',
+            retryAfter: cooldownSeconds,
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
+      /*
+      * Important:
+      * Use the phone stored in the database.
+      */
+      const verification =
+        await this.twilioVerifyService.sendSms(
+          user.phone_number,
+        );
+
       return {
         success: true,
-        message: 'Phone number already verified',
+        message:
+          'Verification code sent successfully',
+        nextStep: 'VERIFY_PHONE',
+
+        data: {
+          userId: user.id,
+          phone:
+            this.maskPhoneNumber(
+              user.phone_number,
+            ),
+          phoneVerified: false,
+          resendAvailableIn:
+            cooldownSeconds,
+          status: verification.status,
+        },
       };
+  }
+  
+  private maskPhoneNumber(
+    phoneNumber: string,
+  ): string {
+    if (!phoneNumber) {
+      return '';
     }
 
-    await this.twilioVerifyService.sendSms(
-      user.phone_number,
-    );
+    if (phoneNumber.length <= 7) {
+      return '***';
+    }
 
-    return {
-      success: true,
-      message: 'Verification code sent',
-    };
-  }
+    return `${phoneNumber.slice(
+      0,
+      4,
+    )}*****${phoneNumber.slice(-3)}`;
+  } 
 
   async forgotPassword(email) {
     try {

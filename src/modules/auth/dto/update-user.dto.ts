@@ -1,72 +1,121 @@
-import { ApiProperty, PartialType } from '@nestjs/swagger';
-import { RegisterUserDto } from './register-user.dto';
-import { IsOptional } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
+import {
+  IsBoolean,
+  IsDateString,
+  IsEmail,
+  IsEmpty,
+  IsNotEmpty,
+  IsString,
+  MaxLength,
+  ValidateIf,
+} from 'class-validator';
 
-export class UpdateUserDto extends PartialType(RegisterUserDto) {
-  @IsOptional()
-  @ApiProperty({ type: 'string', format: 'binary', required: false })
-  image?: any;
+// PATCH fields are optional; null and invalid values are rejected.
+export class UpdateUserDto {
+  // Multipart clients may send an empty image field when no file is selected.
+  // Actual files are handled separately by FileInterceptor.
+  @Transform(({ value }) =>
+    value === '' || value === null || value === 'null' ? undefined : value,
+  )
+  @IsEmpty({ message: 'image must be an uploaded file or empty' })
+  image?: Express.Multer.File | null;
 
-  @IsOptional()
-  @ApiProperty({
-    description: 'Country',
-    example: 'Nigeria',
-  })
-  country?: string;
+  @ApiPropertyOptional({ example: 'John Doe' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(255)
+  @IsNotEmpty()
+  name?: string;
 
-  @IsOptional()
-  @ApiProperty({
-    description: 'State',
-    example: 'Lagos',
-  })
-  state?: string;
+  @ApiPropertyOptional({ example: 'john@example.com' })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(255)
+  @IsNotEmpty()
+  @IsEmail()
+  email?: string;
 
-  @IsOptional()
-  @ApiProperty({
-    description: 'City',
-    example: 'Lagos',
-  })
-  city?: string;
-
-  @IsOptional()
-  @ApiProperty({
-    description: 'Local government',
-    example: 'Lagos',
-  })
-  local_government?: string;
-
-  @IsOptional()
-  @ApiProperty({
-    description: 'Zip code',
-    example: '123456',
-  })
-  zip_code?: string;
-
-  @IsOptional()
-  @ApiProperty({
-    description: 'Phone number',
-    example: '+91 9876543210',
-  })
+  @ApiPropertyOptional({ example: '+8801785412308' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(255)
+  @IsNotEmpty()
   phone_number?: string;
 
-  @IsOptional()
-  @ApiProperty({
-    description: 'Address',
-    example: 'New York, USA',
-  })
+  @ApiPropertyOptional({ example: '1999-12-31' })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsDateString({ strict: true })
+  date_of_birth?: string;
+
+  @ApiPropertyOptional({ example: 'Bangladesh' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(255)
+  country?: string;
+
+  @ApiPropertyOptional({ example: 'Dhaka' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(255)
+  state?: string;
+
+  @ApiPropertyOptional({ example: 'Dhaka' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(255)
+  city?: string;
+
+  @ApiPropertyOptional({ example: '' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(255)
   address?: string;
 
-  @IsOptional()
-  @ApiProperty({
-    description: 'Gender',
-    example: 'male',
-  })
+  @ApiPropertyOptional({ example: '1200' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(255)
+  zip_code?: string;
+
+  @ApiPropertyOptional({ example: 'female' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(255)
   gender?: string;
 
-  @IsOptional()
-  @ApiProperty({
-    description: 'Date of birth',
-    example: '14/11/2001',
-  })
-  date_of_birth?: string;
+  @ApiPropertyOptional({ type: Boolean, description: 'bill remainders' })
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean()
+  bill_remainders?: boolean;
+
+  @ApiPropertyOptional({ type: Boolean, description: 'notification remainder' })
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean()
+  notification_remainder?: boolean;
+
+  @ApiPropertyOptional({ type: Boolean, description: 'email updates' })
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean()
+  email_updates?: boolean;
 }

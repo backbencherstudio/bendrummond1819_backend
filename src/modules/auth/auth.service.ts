@@ -26,7 +26,9 @@ import { SojebStorage } from '../../common/lib/Disk/SojebStorage';
 import { DateHelper } from '../../common/helper/date.helper';
 import { StripePayment } from '../../common/lib/Payment/stripe/StripePayment';
 import { StringHelper } from '../../common/helper/string.helper';
-import { UpdateSwaggerDto } from './dto/update-swagger.dto';
+import { Prisma } from 'prisma/generated/client';
+import { randomUUID } from 'crypto';
+import { Logger } from '@nestjs/common';
 import { TwilioVerifyService } from 'src/twilio/twilio-verify.service';
 import { 
   parsePhoneNumberFromString,
@@ -71,9 +73,14 @@ export class AuthService {
           email: true,
           avatar: true,
           address: true,
+          country: true,
+          state: true,
+          city: true,
+          zip_code: true,
           phone_number: true,
           bill_remainders: true,
           notification_remainder: true,
+          email_updates: true,
           type: true,
           gender: true,
           date_of_birth: true,
@@ -90,7 +97,7 @@ export class AuthService {
 
       if (user.avatar) {
         user['avatar_url'] = SojebStorage.url(
-          appConfig().storageUrl.avatar + user.avatar,
+          appConfig().storageUrl.avatar + '/' + user.avatar,
         );
       }
 
@@ -115,72 +122,88 @@ export class AuthService {
 
   async updateUser(
     userId: string,
-    updateUserDto: UpdateSwaggerDto,
-    image?: Express.Multer.File,
+    dto: UpdateUserDto,
+    image?: Express.Multer.File | null,
   ) {
+    const current = await this.prisma.user.findFirst({
+      where: { id: userId, deleted_at: null },
+      select: { id: true, avatar: true, email: true, phone_number: true },
+    });
+    if (!current) throw new NotFoundException('User not found');
+
+    const data: Prisma.UserUpdateInput = {};
+    for (const field of ['name', 'country', 'state', 'city', 'address', 'zip_code', 'gender',
+      'bill_remainders', 'notification_remainder', 'email_updates'] as const) {
+      if (dto[field] !== undefined) (data as Record<string, unknown>)[field] = dto[field];
+    }
+    if (dto.email !== undefined) {
+      data.email = dto.email;
+      if (dto.email !== current.email) data.email_verified_at = null;
+    }
+    if (dto.phone_number !== undefined) {
+      data.phone_number = this.normalizePhoneNumber(dto.phone_number);
+      if (data.phone_number !== current.phone_number) {
+        data.phone_verified_at = null;
+        data.phone_otp_last_sent_at = null;
+      }
+    }
+    if (dto.date_of_birth !== undefined) {
+      const date = new Date(dto.date_of_birth.slice(0, 10) + 'T00:00:00.000Z');
+      if (!Number.isFinite(date.getTime()) || date > new Date()) {
+        throw new BadRequestException('Date of birth must be a valid date in the past');
+      }
+      data.date_of_birth = date;
+    }
+    if (!image && Object.keys(data).length === 0) {
+      throw new BadRequestException('Provide at least one profile field, setting or image');
+    }
+
+    let newImage: string | undefined;
+    let saved = false;
+    const avatarKey = (name: string) => `${appConfig().storageUrl.avatar}/${name}`;
+    const cleanup = async (name: string) => {
+      try { await SojebStorage.delete(avatarKey(name)); }
+      catch { new Logger(AuthService.name).warn('Could not clean up profile image'); }
+    };
     try {
-      const data: any = {};
-      if (updateUserDto.name) {
-        data.name = updateUserDto.name;
-      }
-      if (updateUserDto.phone_number) {
-        data.phone_number = updateUserDto.phone_number;
-      }
-      if (updateUserDto.date_of_birth) {
-        data.date_of_birth = DateHelper.format(updateUserDto.date_of_birth);
-      }
-
-      if (updateUserDto.bill_remainders) {
-        data.bill_remainders = updateUserDto.bill_remainders;
-      }
-      if (updateUserDto.notification_remainder) {
-        data.notification_remainder = updateUserDto.notification_remainder;
-      }
       if (image) {
-        // delete old image from storage
-        const oldImage = await this.prisma.user.findFirst({
-          where: { id: userId },
-          select: { avatar: true },
-        });
-        if (oldImage.avatar) {
-          await SojebStorage.delete(
-            appConfig().storageUrl.avatar + '/' + oldImage.avatar,
-          );
+        const buffer = image.buffer;
+        const jpeg = buffer?.length >= 3 && buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+        const png = buffer?.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+        const webp = buffer?.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
+        const extension = jpeg && image.mimetype === 'image/jpeg' ? 'jpg'
+          : png && image.mimetype === 'image/png' ? 'png'
+          : webp && image.mimetype === 'image/webp' ? 'webp' : undefined;
+        if (!extension || buffer.length > 5 * 1024 * 1024) {
+          throw new BadRequestException('Upload a valid JPEG, PNG or WebP image up to 5 MB');
         }
-
-        // upload file
-        const fileName = `${StringHelper.randomString()}${image.originalname}`;
-        await SojebStorage.put(
-          appConfig().storageUrl.avatar + '/' + fileName,
-          image.buffer,
-        );
-
-        data.avatar = fileName;
+        newImage = `${randomUUID()}.${extension}`;
+        await SojebStorage.put(avatarKey(newImage), buffer);
+        if (!await SojebStorage.isExists(avatarKey(newImage))) {
+          throw new InternalServerErrorException('Profile image upload failed');
+        }
+        data.avatar = newImage;
       }
-      const user = await this.userRepository.getUserDetails(userId);
-      if (user) {
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: {
-            ...data,
-          },
-        });
-
-        return {
-          success: true,
-          message: 'User updated successfully',
-        };
-      } else {
-        return {
-          success: false,
-          message: 'User not found',
-        };
-      }
-    } catch (error) {
+      const user = await this.prisma.user.update({
+        where: { id: userId }, data: { ...data, updated_at: new Date() },
+        select: {
+          id: true, name: true, email: true, phone_number: true, date_of_birth: true,
+          avatar: true, country: true, state: true, city: true, address: true,
+          zip_code: true, gender: true, bill_remainders: true,
+          notification_remainder: true, email_updates: true,
+        },
+      });
+      saved = true;
+      if (newImage && current.avatar && current.avatar !== newImage) await cleanup(current.avatar);
       return {
-        success: false,
-        message: error.message,
+        success: true, message: 'User updated successfully',
+        data: { ...user, avatar_url: user.avatar ? SojebStorage.url(avatarKey(user.avatar)) : null },
       };
+    } catch (error) {
+      if (newImage && !saved) await cleanup(newImage);
+      if (error.code === 'P2002') throw new ConflictException('Email or phone number is already in use');
+      if (error.code === 'P2025') throw new NotFoundException('User not found');
+      throw error;
     }
   }
 

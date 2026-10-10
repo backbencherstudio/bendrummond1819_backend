@@ -11,6 +11,7 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  ValidationPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -198,26 +199,28 @@ export class AuthController {
   // update user
   @ApiOperation({ summary: 'Update user' })
   @ApiBearerAuth(SWAGGER_AUTH.user)
-  @ApiConsumes('multipart/form-data')
+  @ApiConsumes('multipart/form-data', 'application/json')
+  @ApiBody({ type: UpdateSwaggerDto })
   @UseGuards(JwtAuthGuard)
   @Patch('update')
   @UseInterceptors(
     FileInterceptor('image', {
       storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+      fileFilter: (_req, file, callback) => {
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+          return callback(new HttpException('Image must be JPEG, PNG or WebP', HttpStatus.BAD_REQUEST), false);
+        }
+        callback(null, true);
+      },
     }),
   )
   async updateUser(
     @Req() req: Request,
-    @Body() data: UpdateSwaggerDto,
-    @UploadedFile() image: Express.Multer.File,
+    @Body(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true })) data: UpdateUserDto,
+    @UploadedFile() image?: Express.Multer.File | null,
   ) {
-    try {
-      const user_id = req.user.userId;
-      const response = await this.authService.updateUser(user_id, data, image);
-      return response;
-    } catch (error) {
-      return handleError(error);
-    }
+    return this.authService.updateUser(req.user.userId, data, image);
   }
 
   // --------------change password---------

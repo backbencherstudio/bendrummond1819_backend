@@ -79,6 +79,7 @@ model User {
   // extra notification fields
   bill_remainders        Boolean? @default(false)
   notification_remainder Boolean? @default(false)
+  email_updates          Boolean  @default(true)
 
   // billing id. e.g. stripe customer id
   billing_id String?

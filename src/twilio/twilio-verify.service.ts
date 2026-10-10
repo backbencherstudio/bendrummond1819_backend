@@ -139,12 +139,25 @@ export class TwilioVerifyService {
   async verifySms(
     phoneNumber: string,
     code: string,
-  ) {
-    if (!code?.trim()) {
-      throw new BadRequestException(
-        'Verification code is required',
-      );
+  ): Promise<{
+    success: boolean;
+    status: string;
+  }> {
+    const normalizedCode = code?.trim();
+
+    if (!normalizedCode) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Verification code is required',
+        code: 'OTP_REQUIRED',
+      });
     }
+
+    this.logger.log(
+      `[OTP_VERIFY_START] phone=${this.maskPhoneNumber(
+        phoneNumber,
+      )}`,
+    );
 
     try {
       const verificationCheck =
@@ -152,14 +165,19 @@ export class TwilioVerifyService {
           .services(this.serviceSid)
           .verificationChecks.create({
             to: phoneNumber,
-            code: code.trim(),
+            code: normalizedCode,
           });
 
       const approved =
         verificationCheck.status === 'approved';
 
       this.logger.log(
-        `Twilio verification check: status=${verificationCheck.status}`,
+        `[OTP_VERIFY_RESULT] ${JSON.stringify({
+          phone:
+            this.maskPhoneNumber(phoneNumber),
+          status: verificationCheck.status,
+          approved,
+        })}`,
       );
 
       return {
@@ -195,7 +213,6 @@ export class TwilioVerifyService {
       })}`,
     );
 
-    // Bangladesh/country blocked in VERIFY Geo Permissions
     if (err.code === 60605) {
       throw new HttpException(
         {
@@ -203,73 +220,74 @@ export class TwilioVerifyService {
           message:
             'This destination country is disabled in Twilio Verify Geo Permissions.',
           code: 'OTP_GEO_BLOCKED',
-          twilioCode: err.code,
         },
         HttpStatus.FORBIDDEN,
       );
     }
 
-    // Fraud Guard
     if (err.code === 60410) {
       throw new HttpException(
         {
           success: false,
           message:
-            'Twilio Fraud Guard blocked this verification attempt.',
-          code: 'OTP_FRAUD_GUARD_BLOCKED',
-          twilioCode: err.code,
+            'Verification request was blocked by the verification provider.',
+          code: 'OTP_FRAUD_BLOCKED',
         },
         HttpStatus.FORBIDDEN,
       );
     }
 
-    // Invalid phone/channel/etc.
     if (err.code === 60200) {
       throw new BadRequestException({
         success: false,
         message:
-          'Twilio rejected the phone number or verification parameters.',
+          'Invalid verification request.',
         code: 'OTP_INVALID_PARAMETER',
-        twilioCode: err.code,
       });
     }
 
-    // Too many OTP sends in same verification lifecycle
+    if (err.code === 60202) {
+      throw new HttpException(
+        {
+          success: false,
+          message:
+            'Maximum OTP verification attempts reached. Please request a new code.',
+          code: 'OTP_MAX_CHECK_ATTEMPTS',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     if (err.code === 60203) {
       throw new HttpException(
         {
           success: false,
           message:
-            'Maximum OTP send attempts reached. Please wait before requesting another code.',
+            'Maximum OTP send attempts reached. Please try again later.',
           code: 'OTP_MAX_SEND_ATTEMPTS',
-          twilioCode: err.code,
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    // Too many simultaneous requests for same number
     if (err.code === 60212) {
       throw new HttpException(
         {
           success: false,
           message:
-            'Too many verification requests for this phone number.',
+            'Too many verification requests. Please try again later.',
           code: 'OTP_CONCURRENT_LIMIT',
-          twilioCode: err.code,
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    // SMS channel disabled for Verify Service
     if (err.code === 60223) {
       throw new BadRequestException({
         success: false,
         message:
-          'SMS verification is disabled for this Twilio Verify Service.',
+          'SMS verification is disabled for this verification service.',
         code: 'OTP_CHANNEL_DISABLED',
-        twilioCode: err.code,
       });
     }
 
@@ -277,19 +295,28 @@ export class TwilioVerifyService {
       throw new InternalServerErrorException({
         success: false,
         message:
-          'Twilio authentication failed. Check API Key SID and API Secret.',
+          'Phone verification provider authentication failed.',
         code: 'OTP_PROVIDER_AUTH_ERROR',
-        twilioCode: err.code,
       });
     }
 
     if (err.status === 404) {
+      if (
+        operation === 'verify verification code'
+      ) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Verification code is invalid, expired, or no longer active. Please request a new code.',
+          code: 'OTP_EXPIRED_OR_INVALID',
+        });
+      }
+
       throw new InternalServerErrorException({
         success: false,
         message:
-          'Twilio Verify Service was not found. Check the Verify Service SID and Twilio account.',
+          'Phone verification service configuration could not be found.',
         code: 'OTP_SERVICE_NOT_FOUND',
-        twilioCode: err.code,
       });
     }
 
@@ -300,7 +327,6 @@ export class TwilioVerifyService {
           message:
             'Too many verification attempts. Please try again later.',
           code: 'OTP_RATE_LIMITED',
-          twilioCode: err.code,
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );
@@ -311,7 +337,6 @@ export class TwilioVerifyService {
       message:
         'Phone verification service is temporarily unavailable.',
       code: 'OTP_PROVIDER_ERROR',
-      twilioCode: err.code,
     });
   }
 }

@@ -113,12 +113,12 @@ export class VerifyPhoneOtpDto {
 
   @ApiProperty({
     example: '123456',
-    description: 'OTP code sent to the user phone number',
+    description: '6-digit OTP sent to the user phone number',
   })
   @IsString()
   @IsNotEmpty()
   @Matches(/^\d{6}$/, {
-    message: 'OTP must be a 6-digit code',
+    message: 'OTP must be exactly 6 digits',
   })
   code: string;
 }

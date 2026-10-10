@@ -690,31 +690,28 @@ export class AuthService {
       await this.userRepository.findById(userId);
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException({
+        success: false,
+        message: 'User not found',
+        code: 'USER_NOT_FOUND',
+      });
     }
 
     if (!user.phone_number) {
-      throw new BadRequestException(
-        'Phone number is not associated with this account',
-      );
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Phone number is not associated with this account',
+        code: 'PHONE_NOT_FOUND',
+      });
     }
 
     if (user.phone_verified_at) {
-      const accessToken =
-        await this.generateAccessToken(user);
-
-      return {
-        success: true,
-        message: 'Phone number already verified',
-        accessToken,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone_number,
-          phoneVerified: true,
-        },
-      };
+      throw new ConflictException({
+        success: false,
+        message: 'Phone number is already verified',
+        code: 'PHONE_ALREADY_VERIFIED',
+      });
     }
 
     const verification =
@@ -727,9 +724,12 @@ export class AuthService {
       !verification.success ||
       verification.status !== 'approved'
     ) {
-      throw new BadRequestException(
-        'Invalid or expired verification code',
-      );
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Invalid or expired verification code',
+        code: 'OTP_INVALID',
+      });
     }
 
     const verifiedUser =
@@ -742,7 +742,8 @@ export class AuthService {
 
     return {
       success: true,
-      message: 'Phone number verified successfully',
+      message:
+        'Phone number verified successfully',
       accessToken,
       user: {
         id: verifiedUser.id,

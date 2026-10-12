@@ -264,6 +264,14 @@ export class AuthService {
     };
   }
 
+  async checkPaymentComplete(userId: string): Promise<boolean> {
+    const payment = await this.prisma.paymentTransaction.findFirst({
+      where: { user_id: userId, status: 'succeeded', deleted_at: null },
+      select: { id: true },
+    });
+    return payment !== null;
+  }
+
   async login({
     userId,
   }: {
@@ -279,6 +287,8 @@ export class AuthService {
         'User not found',
       );
     }
+
+    const isPaymentComplete = await this.checkPaymentComplete(user.id);
 
     const payload = {
       sub: user.id,
@@ -320,6 +330,7 @@ export class AuthService {
         refresh_token: refreshToken,
       },
       type: user.type,
+      isPaymentComplete,
     };
   }
 

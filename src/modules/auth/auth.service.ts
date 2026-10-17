@@ -27,7 +27,8 @@ import { DateHelper } from '../../common/helper/date.helper';
 import { StripePayment } from '../../common/lib/Payment/stripe/StripePayment';
 import { StringHelper } from '../../common/helper/string.helper';
 import { Prisma } from 'prisma/generated/client';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomInt, createHash } from 'crypto';
+import { VERIFY_EMAIL_RESET_OTP } from './email-reset-otp';
 import { Logger } from '@nestjs/common';
 import { TwilioVerifyService } from 'src/twilio/twilio-verify.service';
 import { 
@@ -972,6 +973,55 @@ export class AuthService {
     )}*****${phoneNumber.slice(-3)}`;
   } 
 
+  private emailResetKey(email: string) {
+    return `password-reset:email:${createHash('sha256').update(email).digest('hex')}`;
+  }
+
+  async forgotPasswordByEmail(input: string) {
+    const email = input.trim().toLowerCase();
+    const key = this.emailResetKey(email);
+    const response = {
+      success: true,
+      message: 'If an active account exists with this email, a verification code has been sent.',
+      nextStep: 'VERIFY_FORGOT_PASSWORD_OTP',
+      data: { resendAvailableIn: 30, expiresIn: 600, channel: 'email' },
+    };
+    const allowed = await this.redis.set(`${key}:cooldown`, '1', 'EX', 30, 'NX');
+    if (!allowed) return response;
+    const user = await this.prisma.user.findFirst({
+      where: { email, deleted_at: null, status: 1 },
+      select: { id: true, name: true },
+    });
+    if (!user) return response;
+    const code = String(randomInt(100000, 1000000));
+    const hash = createHash('sha256').update(code).digest('hex');
+    await this.redis.set(key, JSON.stringify({ hash, userId: user.id, attempts: 0 }), 'EX', 600);
+    try {
+      await this.mailService.sendPasswordResetCode({ email, name: user.name ?? 'User', otp: code });
+    } catch {
+      await this.redis.del(key, `${key}:cooldown`);
+      throw new InternalServerErrorException('Could not queue the password reset email. Please try again.');
+    }
+    return response;
+  }
+
+  async verifyEmailPasswordResetOtp(input: string, code: string) {
+    const email = input.trim().toLowerCase();
+    const hash = createHash('sha256').update(code).digest('hex');
+    const userId = await this.redis.eval(VERIFY_EMAIL_RESET_OTP, 1, this.emailResetKey(email), hash);
+    if (typeof userId !== 'string' || !userId) {
+      throw new BadRequestException('Invalid or expired verification code');
+    }
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, email, deleted_at: null, status: 1 }, select: { id: true },
+    });
+    if (!user) throw new BadRequestException('Invalid password reset request');
+    const jti = randomUUID();
+    const resetToken = this.jwtService.sign({ sub: user.id, purpose: 'password-reset', jti }, { expiresIn: '10m' });
+    await this.redis.set(`password-reset:token:${jti}`, user.id, 'EX', 600);
+    return { success: true, message: 'Email code verified successfully', nextStep: 'RESET_PASSWORD', data: { resetToken } };
+  }
+
   async forgotPassword(
     phone: string,
   ) {
@@ -1123,6 +1173,7 @@ export class AuthService {
     let payload: {
       sub: string;
       purpose: string;
+      jti?: string;
     };
 
     try {
@@ -1165,6 +1216,14 @@ export class AuthService {
           'Invalid password reset request',
         code: 'INVALID_RESET_REQUEST',
       });
+    }
+
+    if (Buffer.byteLength(password, 'utf8') > 72) {
+      throw new BadRequestException('Password must not exceed 72 UTF-8 bytes');
+    }
+    if (payload.jti) {
+      const owner = await this.redis.call('GETDEL', `password-reset:token:${payload.jti}`);
+      if (owner !== user.id) throw new UnauthorizedException('Password reset token is invalid or already used');
     }
 
     const hashedPassword =

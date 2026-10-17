@@ -7,6 +7,23 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async registrationChart() {
+    const now = new Date();
+    const months = Array.from({ length: 6 }, (_, index) => {
+      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5 + index, 1));
+      const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+      return { start, end };
+    });
+    const data = await Promise.all(months.map(async ({ start, end }) => ({
+      month: start.toISOString().slice(0, 7),
+      label: start.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }),
+      registrations: await this.prisma.user.count({
+        where: { type: 'user', deleted_at: null, created_at: { gte: start, lt: end > now ? now : end } },
+      }),
+    })));
+    return { success: true, message: 'Registration chart retrieved successfully', timezone: 'UTC', data };
+  }
+
   async subscriptionUsage() {
     try {
       // Subscription Breakdown

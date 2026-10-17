@@ -1,4 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { 
   IsEmail, 
   IsNotEmpty, 
@@ -6,6 +7,7 @@ import {
   MinLength,
   Matches,
   MaxLength,
+  ValidateIf,
  } from 'class-validator';
 
 export class LoginDto {
@@ -43,20 +45,18 @@ export class RefreshTokenDto {
 }
 
 export class ForgotPasswordDto {
-  @ApiProperty({
-    example: '+8801844467018',
-    description:
-      'Phone number in international E.164 format',
-  })
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^\+[1-9]\d{7,14}$/, {
-    message:
-      'Phone number must be in valid international format',
-  })
-  phone: string;
-}
+  @ApiPropertyOptional({ example: 'user@example.com', description: 'Send exactly one of email or phone. Email receives a password reset OTP.' })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEmail()
+  email?: string;
 
+  @ApiPropertyOptional({ example: '+8801844467018', description: 'Send exactly one of email or phone. Phone retains the existing SMS OTP flow.' })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @Matches(/^\+[1-9]\d{7,14}$/)
+  phone?: string;
+}
 
 export class ResendVerificationEmailDto {
   @ApiProperty({
@@ -139,26 +139,42 @@ export class ResendPhoneOtpDto {
 }
 
 export class VerifyForgotPasswordOtpDto {
-  @ApiProperty({
-    example:
-      'cmuz67o6i00008zm953rv5gpt',
-    description:
-      'User ID returned from forgot-password request',
-  })
-  @IsString()
-  @IsNotEmpty()
-  userId: string;
+  @ApiPropertyOptional({ example: 'user@example.com', description: 'For email reset, use the same email as forgot-password. Send exactly one of email or userId.' })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEmail()
+  email?: string;
 
-  @ApiProperty({
-    example: '123456',
-    description:
-      '6-digit OTP sent to phone',
-  })
+  @ApiPropertyOptional({ description: 'For phone reset, use the userId returned by forgot-password. Send exactly one of email or userId.' })
+  @ValidateIf((_, value) => value !== undefined)
   @IsString()
   @IsNotEmpty()
-  @Matches(/^\d{6}$/, {
-    message:
-      'OTP must be exactly 6 digits',
-  })
+  userId?: string;
+
+  @ApiProperty({ example: '123456', description: 'Six-digit OTP received by email or SMS' })
+  @IsString()
+  @Matches(/^\d{6}$/)
   code: string;
+}
+
+export class PasswordResetRequestDataDto {
+  @ApiPropertyOptional({ description: 'Returned only for an existing account in the phone flow' }) userId?: string;
+  @ApiProperty({ example: 30 }) resendAvailableIn: number;
+  @ApiPropertyOptional({ example: 600, description: 'Email OTP validity in seconds' }) expiresIn?: number;
+  @ApiPropertyOptional({ example: 'email' }) channel?: string;
+}
+export class PasswordResetRequestResponseDto {
+  @ApiProperty({ example: true }) success: boolean;
+  @ApiProperty() message: string;
+  @ApiPropertyOptional({ example: 'VERIFY_FORGOT_PASSWORD_OTP' }) nextStep?: string;
+  @ApiPropertyOptional({ type: PasswordResetRequestDataDto }) data?: PasswordResetRequestDataDto;
+}
+export class PasswordResetTokenDataDto {
+  @ApiProperty({ description: 'Use this short-lived token as resetToken in POST /api/auth/reset-password' }) resetToken: string;
+}
+export class PasswordResetVerificationResponseDto {
+  @ApiProperty({ example: true }) success: boolean;
+  @ApiProperty() message: string;
+  @ApiProperty({ example: 'RESET_PASSWORD' }) nextStep: string;
+  @ApiProperty({ type: PasswordResetTokenDataDto }) data: PasswordResetTokenDataDto;
 }

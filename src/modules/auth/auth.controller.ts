@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Get,
   HttpException,
@@ -18,6 +19,7 @@ import {
   ApiBody,
   ApiConsumes,
   ApiOperation,
+  ApiCreatedResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { Request, Response } from 'express';
@@ -34,6 +36,8 @@ import { AuthGuard } from '@nestjs/passport';
 import { SWAGGER_AUTH } from 'src/common/swagger/swagger';
 import { handleError } from '../../common/helper/error-handler.helper';
 import {
+  PasswordResetRequestResponseDto,
+  PasswordResetVerificationResponseDto,
   ChangePasswordDto,
   ForgotPasswordDto,
   LoginDto,
@@ -226,18 +230,23 @@ export class AuthController {
   // --------------change password---------
 
   @ApiOperation({
-    summary: 'Send forgot password OTP to phone',
+    summary: 'Send password reset OTP by email or phone',
+    description: 'Send exactly one of email or phone. Email OTP expires in 10 minutes, with a 30-second resend cooldown and five verification attempts. Phone SMS flow remains supported.',
   })
   @ApiBody({
     type: ForgotPasswordDto,
   })
+  @ApiCreatedResponse({ type: PasswordResetRequestResponseDto })
   @Post('forgot-password')
   async forgotPassword(
-    @Body() data: ForgotPasswordDto,
+    @Body(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true })) data: ForgotPasswordDto,
   ) {
-    return this.authService.forgotPassword(
-      data.phone,
-    );
+    if (Boolean(data.email) === Boolean(data.phone)) {
+      throw new BadRequestException('Provide exactly one of email or phone');
+    }
+    return data.email
+      ? this.authService.forgotPasswordByEmail(data.email)
+      : this.authService.forgotPassword(data.phone);
   }
 
   // verify email to verify the email
@@ -267,20 +276,23 @@ export class AuthController {
 
   @ApiOperation({
     summary:
-      'Verify forgot password OTP',
+      'Verify password reset OTP received by email or SMS',
   })
   @ApiBody({
     type: VerifyForgotPasswordOtpDto,
   })
+  @ApiCreatedResponse({ type: PasswordResetVerificationResponseDto })
   @Post('forgot-password/verify-otp')
   async verifyForgotPasswordOtp(
-    @Body()
+    @Body(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
     data: VerifyForgotPasswordOtpDto,
   ) {
-    return this.authService.verifyForgotPasswordOtp(
-      data.userId,
-      data.code,
-    );
+    if (Boolean(data.email) === Boolean(data.userId)) {
+      throw new BadRequestException('Provide exactly one of email or userId');
+    }
+    return data.email
+      ? this.authService.verifyEmailPasswordResetOtp(data.email, data.code)
+      : this.authService.verifyForgotPasswordOtp(data.userId, data.code);
   } 
 
   // resend verification email to verify the email

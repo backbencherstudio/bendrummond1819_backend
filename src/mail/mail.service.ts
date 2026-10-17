@@ -11,6 +11,16 @@ export class MailService {
     private mailerService: MailerService,
   ) {}
 
+  async sendPasswordResetCode({ name, email, otp }: { name: string; email: string; otp: string }) {
+    await this.queue.add('sendOtpCodeToEmail', {
+      to: email,
+      from: `${process.env.APP_NAME} <${appConfig().mail.from}>`,
+      subject: 'Password reset code',
+      template: 'password-reset',
+      context: { name, otp },
+    }, { attempts: 3, backoff: { type: 'exponential', delay: 1000 }, removeOnComplete: true, removeOnFail: 100 });
+  }
+
   async sendMemberInvitation({ user, member, url }) {
     try {
       const from = `${process.env.APP_NAME} <${appConfig().mail.from}>`;

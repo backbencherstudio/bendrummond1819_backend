@@ -26,7 +26,7 @@ export class MailService {
       const from = `${process.env.APP_NAME} <${appConfig().mail.from}>`;
       const subject = `${user.fname} is inviting you to ${appConfig().app.name}`;
 
-      // add to queue
+      // add to queue in mail service
       await this.queue.add('sendMemberInvitation', {
         to: member.email,
         from: from,
